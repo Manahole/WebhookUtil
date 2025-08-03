@@ -1,0 +1,194 @@
+﻿@page "/"
+@using System.ComponentModel.DataAnnotations
+@using WebhookUtil.Models
+@using WebhookUtil.Services
+@inject WebhookService WebhookService
+@implements IDisposable
+
+<PageTitle>Webhook Aggregator</PageTitle>
+
+<h1>Gestion des Webhooks</h1>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3>Ajouter un nouveau Webhook</h3>
+            </div>
+            <div class="card-body">
+                <EditForm Model="@newWebhook" OnValidSubmit="@AddWebhook">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Nom</label>
+                        <InputText id="name" class="form-control" @bind-Value="newWebhook.Name" />
+                        <ValidationMessage For="@(() => newWebhook.Name)" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="listenPath" class="form-label">Chemin d'écoute</label>
+                        <InputText id="listenPath" class="form-control" @bind-Value="newWebhook.ListenPath" placeholder="mon-webhook" />
+                        <ValidationMessage For="@(() => newWebhook.ListenPath)" />
+                        <div class="form-text">URL complète: /webhook/@(newWebhook.ListenPath)</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="targetUrl" class="form-label">URL de destination</label>
+                        <InputText id="targetUrl" class="form-control" @bind-Value="newWebhook.TargetWebhookUrl" placeholder="https://example.com/webhook" />
+                        <ValidationMessage For="@(() => newWebhook.TargetWebhookUrl)" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="bufferTime" class="form-label">Temps de buffer (secondes)</label>
+                        <InputNumber id="bufferTime" class="form-control" @bind-Value="newWebhook.BufferTimeSeconds" />
+                        <ValidationMessage For="@(() => newWebhook.BufferTimeSeconds)" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="maxBuffer" class="form-label">Taille max du buffer</label>
+                        <InputNumber id="maxBuffer" class="form-control" @bind-Value="newWebhook.MaxBufferSize" />
+                        <ValidationMessage For="@(() => newWebhook.MaxBufferSize)" />
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Ajouter Webhook</button>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3>Webhooks configurés</h3>
+            </div>
+            <div class="card-body">
+                @if (webhooks.Any())
+                {
+                    @foreach (var webhook in webhooks)
+                    {
+                        <div class="card mb-2">
+                            <div class="card-body">
+                                <h5 class="card-title">@webhook.Name</h5>
+                                <p class="card-text">
+                                    <strong>Écoute:</strong> /webhook/@webhook.ListenPath<br />
+                                    <strong>Destination:</strong> @webhook.TargetWebhookUrl<br />
+                                    <strong>Buffer:</strong> @webhook.BufferTimeSeconds s / @webhook.MaxBufferSize messages<br />
+                                    <strong>Status:</strong>
+                                    <span class="badge @(webhook.IsActive ? "bg-success" : "bg-secondary")">
+                                        @(webhook.IsActive ? "Actif" : "Inactif")
+                                    </span>
+                                </p>
+                                <button class="btn btn-danger btn-sm" @onclick="() => RemoveWebhook(webhook.Id)">
+                                    Supprimer
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <p class="text-muted">Aucun webhook configuré</p>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3>Instructions d'utilisation</h3>
+            </div>
+            <div class="card-body">
+                <ol>
+                    <li>Configurez un nouveau webhook en remplissant le formulaire ci-dessus</li>
+                    <li>Le webhook sera accessible à l'URL: <code>POST /webhook/[chemin-d-ecoute]</code></li>
+                    <li>Les messages reçus seront bufferisés selon la configuration</li>
+                    <li>Une fois le buffer plein ou le temps écoulé, les messages agrégés seront envoyés vers l'URL de destination</li>
+                </ol>
+
+                <h5>Exemple de payload agrégé envoyé:</h5>
+                <pre><code>{
+  "webhookId": "abc123",
+  "webhookName": "Mon Webhook",
+  "messageCount": 3,
+  "messages": [
+    {
+      "webhookId": "abc123",
+      "body": "message 1",
+      "headers": {"content-type": "application/json"},
+      "receivedAt": "2024-01-01T10:00:00Z"
+    }
+  ],
+  "aggregatedAt": "2024-01-01T10:00:30Z",
+  "bufferDuration": "00:00:30"
+}</code></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private WebhookConfigModel newWebhook = new();
+    private List<WebhookConfig> webhooks = new();
+
+    protected override void OnInitialized()
+    {
+        LoadWebhooks();
+        WebhookService.ConfigurationsChanged += LoadWebhooks;
+    }
+
+    private void LoadWebhooks()
+    {
+        webhooks = WebhookService.GetAllWebhooks().ToList();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void AddWebhook()
+    {
+        var config = new WebhookConfig
+            {
+                Name = newWebhook.Name,
+                ListenPath = newWebhook.ListenPath,
+                TargetWebhookUrl = newWebhook.TargetWebhookUrl,
+                BufferTimeSeconds = newWebhook.BufferTimeSeconds,
+                MaxBufferSize = newWebhook.MaxBufferSize
+            };
+
+        WebhookService.AddWebhook(config);
+        WebhookService.SaveWebhookConfig(config);
+        newWebhook = new WebhookConfigModel();
+    }
+
+    private void RemoveWebhook(string webhookId)
+    {
+        WebhookService.RemoveWebhook(webhookId);
+    }
+
+    public void Dispose()
+    {
+        WebhookService.ConfigurationsChanged -= LoadWebhooks;
+    }
+
+    public class WebhookConfigModel
+    {
+        [Required(ErrorMessage = "Le nom est requis")]
+        public string Name { get; set; } = "";
+
+        [Required(ErrorMessage = "Le chemin d'écoute est requis")]
+        [RegularExpression(@"^[a-zA-Z0-9\-_]+$", ErrorMessage = "Seuls les lettres, chiffres, tirets et underscores sont autorisés")]
+        public string ListenPath { get; set; } = "";
+
+        [Required(ErrorMessage = "L'URL de destination est requise")]
+        [Url(ErrorMessage = "L'URL n'est pas valide")]
+        public string TargetWebhookUrl { get; set; } = "";
+
+        [Range(1, 1_000_000, ErrorMessage = "Le temps de buffer doit être entre 1 et 1M secondes")]
+        public int BufferTimeSeconds { get; set; } = 30;
+
+        [Range(0, 1000, ErrorMessage = "La taille du buffer doit être entre 0 et 1000 messages")]
+        public int MaxBufferSize { get; set; } = 0;
+    }
+}
