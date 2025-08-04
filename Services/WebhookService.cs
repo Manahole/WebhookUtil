@@ -169,21 +169,26 @@ public class WebhookService
         }
     }
 
-    private const string _directory = ".";
+    private const string _directory = "hooks/";
 
     public static void SaveWebhookConfig(WebhookConfig config)
     {
-        File.WriteAllText($"hook_{config.Id}.json", JsonSerializer.Serialize(config));
+        File.WriteAllText($"{_directory}hook_{config.Id}.json", JsonSerializer.Serialize(config));
     }
 
     public static void RemoveWebhookConfig(WebhookConfig config)
     {
-        File.Delete($"hook_{config.Id}.json");
+        File.Delete($"{_directory}hook_{config.Id}.json");
     }
 
     private static IEnumerable<WebhookConfig> ReloadWebhookConfigs()
     {
-        return new DirectoryInfo(_directory)
+        var di = new DirectoryInfo(_directory);
+        if (!di.Exists)
+        {
+            di.Create();
+        }
+        return di
             .GetFiles()
             .Where(x => x.Name.StartsWith("hook_"))
             .Select(x => File.ReadAllText(x.FullName))
