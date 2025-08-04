@@ -44,6 +44,10 @@
                         <InputNumber id="bufferTime" class="form-control" @bind-Value="newWebhook.BufferTimeSeconds" />
                         <ValidationMessage For="@(() => newWebhook.BufferTimeSeconds)" />
                     </div>
+                    <div class="mb-3">
+                        <label for="cron" class="form-label">Cron</label>
+                        <InputText id="cron" class="form-control" @bind-Value="newWebhook.Cron" />
+                    </div>
 
                     <div class="mb-3">
                         <label for="maxBuffer" class="form-label">Taille max du buffer</label>
@@ -51,7 +55,7 @@
                         <ValidationMessage For="@(() => newWebhook.MaxBufferSize)" />
                     </div>
 
-                    <button type="submit" class="btn btn-primary">Ajouter Webhook</button>
+                    <button type="submit" class="btn btn-primary">Add Webhook</button>
                 </EditForm>
             </div>
         </div>
@@ -60,7 +64,42 @@
     <div class="col-md-6">
         <div class="card">
             <div class="card-header">
-                <h3>Webhooks configurés</h3>
+                <h3>Instructions d'utilisation</h3>
+            </div>
+            <div class="card-body">
+                <ol>
+                    <li>Configurez un nouveau webhook en remplissant le formulaire</li>
+                    <li>Le webhook sera accessible à l'URL: <code>POST /webhook/[chemin-d-ecoute]</code></li>
+                    <li>Les messages reçus seront bufferisés selon la configuration</li>
+                    <li>Une fois le buffer plein ou le temps écoulé, les messages agrégés seront envoyés vers l'URL de destination</li>
+                </ol>
+
+                <h5>Exemple de payload agrégé envoyé:</h5>
+                <pre><code>{
+                        "webhookId": "abc123",
+                        "webhookName": "Mon Webhook",
+                        "messageCount": 3,
+                        "messages": [
+                        {
+                        "webhookId": "abc123",
+                        "body": "message 1",
+                        "headers": {"content-type": "application/json"},
+                        "receivedAt": "2024-01-01T10:00:00Z"
+                        }
+                        ],
+                        "aggregatedAt": "2024-01-01T10:00:30Z",
+                        "bufferDuration": "00:00:30"
+                        }</code></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3>Existing webhooks</h3>
             </div>
             <div class="card-body">
                 @if (webhooks.Any())
@@ -71,17 +110,30 @@
                             <div class="card-body">
                                 <h5 class="card-title">@webhook.Name</h5>
                                 <p class="card-text">
-                                    <strong>Écoute:</strong> /webhook/@webhook.ListenPath<br />
+                                    <strong>Listen:</strong> /webhook/@webhook.ListenPath<br />
                                     <strong>Destination:</strong> @webhook.TargetWebhookUrl<br />
-                                    <strong>Buffer:</strong> @webhook.BufferTimeSeconds s / @webhook.MaxBufferSize messages<br />
+                                    <strong>Buffer:</strong> @webhook.Strategy<br />
                                     <strong>Status:</strong>
                                     <span class="badge @(webhook.IsActive ? "bg-success" : "bg-secondary")">
-                                        @(webhook.IsActive ? "Actif" : "Inactif")
-                                    </span>
+                                        @(webhook.IsActive ? "Active" : "Paused")
+                                    </span><br />
+                                    <strong>In/Out/Pending:</strong> @webhook.HookIn / @webhook.HookOut / @webhook.HookPending<br />
                                 </p>
+
                                 <button class="btn btn-danger btn-sm" @onclick="() => RemoveWebhook(webhook.Id)">
-                                    Supprimer
+                                    Delete
                                 </button>
+                                <div class="divider" />
+                                @if (webhook.IsActive)
+                                {
+                                    <button class="btn btn-warning btn-sm" @onclick="() => PauseWebhook(webhook.Id)">
+                                        Pause
+                                    </button>
+                                } else {
+                                    <button class="btn btn-primary btn-sm" @onclick="() => ResumeWebhook(webhook.Id)">
+                                        Resume
+                                    </button>
+                                }
                             </div>
                         </div>
                     }
@@ -95,41 +147,6 @@
     </div>
 </div>
 
-<div class="row mt-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h3>Instructions d'utilisation</h3>
-            </div>
-            <div class="card-body">
-                <ol>
-                    <li>Configurez un nouveau webhook en remplissant le formulaire ci-dessus</li>
-                    <li>Le webhook sera accessible à l'URL: <code>POST /webhook/[chemin-d-ecoute]</code></li>
-                    <li>Les messages reçus seront bufferisés selon la configuration</li>
-                    <li>Une fois le buffer plein ou le temps écoulé, les messages agrégés seront envoyés vers l'URL de destination</li>
-                </ol>
-
-                <h5>Exemple de payload agrégé envoyé:</h5>
-                <pre><code>{
-  "webhookId": "abc123",
-  "webhookName": "Mon Webhook",
-  "messageCount": 3,
-  "messages": [
-    {
-      "webhookId": "abc123",
-      "body": "message 1",
-      "headers": {"content-type": "application/json"},
-      "receivedAt": "2024-01-01T10:00:00Z"
-    }
-  ],
-  "aggregatedAt": "2024-01-01T10:00:30Z",
-  "bufferDuration": "00:00:30"
-}</code></pre>
-            </div>
-        </div>
-    </div>
-</div>
-
 @code {
     private WebhookConfigModel newWebhook = new();
     private List<WebhookConfig> webhooks = new();
@@ -138,6 +155,7 @@
     {
         LoadWebhooks();
         WebhookService.ConfigurationsChanged += LoadWebhooks;
+        WebhookService.StateChanged += () => InvokeAsync(StateHasChanged);
     }
 
     private void LoadWebhooks()
@@ -154,7 +172,8 @@
                 ListenPath = newWebhook.ListenPath,
                 TargetWebhookUrl = newWebhook.TargetWebhookUrl,
                 BufferTimeSeconds = newWebhook.BufferTimeSeconds,
-                MaxBufferSize = newWebhook.MaxBufferSize
+                MaxBufferSize = newWebhook.MaxBufferSize,
+                Cron = newWebhook.Cron
             };
 
         WebhookService.AddWebhook(config);
@@ -165,6 +184,16 @@
     private void RemoveWebhook(string webhookId)
     {
         WebhookService.RemoveWebhook(webhookId);
+    }
+
+    private void PauseWebhook(string webhookId)
+    {
+        WebhookService.PauseWebhook(webhookId);
+    }
+
+    private void ResumeWebhook(string webhookId)
+    {
+        WebhookService.ResumeWebhook(webhookId);
     }
 
     public void Dispose()
@@ -185,10 +214,12 @@
         [Url(ErrorMessage = "L'URL n'est pas valide")]
         public string TargetWebhookUrl { get; set; } = "";
 
-        [Range(1, 1_000_000, ErrorMessage = "Le temps de buffer doit être entre 1 et 1M secondes")]
-        public int BufferTimeSeconds { get; set; } = 30;
+        [Range(0, 1_000_000, ErrorMessage = "Le temps de buffer doit être entre 0 et 1M secondes")]
+        public int BufferTimeSeconds { get; set; } = 0;
 
         [Range(0, 1000, ErrorMessage = "La taille du buffer doit être entre 0 et 1000 messages")]
         public int MaxBufferSize { get; set; } = 0;
+
+        public string Cron { get; set; } = string.Empty;
     }
 }

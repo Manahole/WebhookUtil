@@ -1,4 +1,7 @@
-﻿namespace WebhookUtil.Models
+﻿using Microsoft.Extensions.Diagnostics.HealthChecks;
+using System.Text.Json.Serialization;
+
+namespace WebhookUtil.Models
 {
     public class WebhookConfig
     {
@@ -9,7 +12,25 @@
         public int BufferTimeSeconds { get; set; } = 30;
         public int MaxBufferSize { get; set; } = 0;
         public bool IsActive { get; set; } = true;
+        public string Cron { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.Now;
+        [JsonIgnore]
+        public int HookIn { get; set; }
+        [JsonIgnore]
+        public int HookOut { get; set; }
+        [JsonIgnore]
+        public int HookPending { get; set; }
+        [JsonIgnore]
+        public string Strategy { 
+            get
+            {
+                if(BufferTimeSeconds > 0)
+                {
+                    return $"Buffer {BufferTimeSeconds}s {(MaxBufferSize > 0 ? $"Max {MaxBufferSize} items" : string.Empty)}";
+                }
+                return $"Cron : {Cron}";
+            }
+        }
     }
 
     public class WebhookMessage
